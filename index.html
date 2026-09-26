@@ -134,6 +134,9 @@
     </div>
   </dialog>
 
+  <script src="js/booking-rules.js"></script>
+  <script src="js/booking-ledger.js"></script>
+  <script src="js/booking-ui.js"></script>
   <script>
     const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
     const storageKey = "zfl42Works";
@@ -170,6 +173,7 @@
 
     function updateStatus(id, status) {
       const work = works.find(w => w.id === id);
+      if (window.BookingUi && !window.BookingUi.beforeStatusChange(id, status)) return;
       work.status = status;
       if (status === "待阴干") work.dryDate = new Date().toISOString().slice(0, 10);
       if (status === "上金粉") work.gold = "已上金粉";
@@ -186,6 +190,7 @@
       work.defect = work.defect ? `${work.defect}; ${value}` : value;
       work.logs.push(`${new Date().toLocaleString()} 缺陷：${value}`);
       save();
+      window.dispatchEvent(new CustomEvent("work:defect-recorded", { detail: { id, value } }));
       render();
     }
 
@@ -220,6 +225,7 @@
           <h3><span>${status}</span><span>${cards.length}</span></h3>
           ${cards.length ? cards.map(w => `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
             <b>${w.theme}</b>
+            ${window.BookingUi ? window.BookingUi.badgeHtml(w) : ""}
             <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
             <div class="actions" onclick="event.stopPropagation()">
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
@@ -257,6 +263,7 @@
       form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
       save();
       render();
+      window.dispatchEvent(new Event("work:created"));
     });
 
     document.querySelector("#saveDefect").addEventListener("click", () => {
@@ -282,6 +289,31 @@
     window.updateStatus = updateStatus;
     window.recordDefect = recordDefect;
     window.showDetail = showDetail;
+
+    // 供预订台账读写作品数据（只读获取 + 追加流转记录 + 置回待交付）
+    window.Workshop = {
+      getWorks: () => works,
+      appendWorkLog(id, line) {
+        const w = works.find(item => item.id === id);
+        if (w) {
+          w.logs.push(`${new Date().toLocaleString()} ${line}`);
+          save();
+          render();
+        }
+      },
+      setDeliveryStatus(id) {
+        const w = works.find(item => item.id === id);
+        if (w) {
+          w.status = "待交付";
+          w.progress = 100;
+          save();
+          render();
+        }
+      }
+    };
+
+    window.addEventListener("bookings:changed", render);
+
     save();
     render();
   </script>

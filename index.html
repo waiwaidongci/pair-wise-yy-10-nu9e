@@ -51,10 +51,26 @@
     dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
     .dialog-body { padding: 16px; display: grid; gap: 10px; }
     .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .lock-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .badge { display: inline-block; font-size: 12px; border-radius: 4px; padding: 1px 7px; color: #fff; }
+    .badge.pending { background: var(--amber); }
+    .badge.locked { background: var(--teal); }
+    .badge.released { background: #5d6764; }
+    .badge.void { background: var(--red); }
+    .badge.open { background: var(--violet); }
+    .lock-box { margin-top: 8px; padding: 8px; border: 1px dashed var(--line); border-radius: 7px; background: #f4f8f5; display: grid; gap: 4px; }
+    .lock-box.pending { border-left: 4px solid var(--amber); }
+    .lock-box.locked { border-left: 4px solid var(--teal); }
+    .lock-box.open { border-left: 4px solid var(--violet); }
+    .lock-box .actions button { font-size: 12px; padding: 6px 8px; min-width: auto; flex: none; }
+    .lock-detail { margin-top: 8px; padding: 8px; border-radius: 7px; background: #f4f8f5; border-left: 4px solid var(--teal); font-size: 13px; }
+    .lock-detail.pending { border-left-color: var(--amber); }
+    .lock-detail.ended { border-left-color: var(--muted); color: var(--muted); }
+    .conflict { color: var(--red); background: #f7ecec; border: 1px solid #e2c3c4; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin: 0; }
     @media (max-width: 980px) {
       header { display: block; padding: 18px; }
       main { padding: 16px; }
-      .top, .lists, .toolbar { grid-template-columns: 1fr; }
+      .top, .lists, .toolbar, .lock-grid { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
     }
   </style>
@@ -118,6 +134,31 @@
         <div id="board" class="board"></div>
       </section>
     </section>
+
+    <section class="panel">
+      <h2>预订锁单台</h2>
+      <div class="meta" style="margin-bottom:10px">
+        仅「待交付 · 进度 100% · 无缺陷」的作品可锁单；锁单有效期内不能再接第二单。到点未收定金自动释放；收到定金后改稿或补记缺陷，单子失效并回到待交付。
+      </div>
+      <div class="lock-grid">
+        <div class="mini">
+          <h3>可锁单作品</h3>
+          <div id="lockableList"></div>
+        </div>
+        <div class="mini">
+          <h3>待定金锁单</h3>
+          <div id="pendingBookings"></div>
+        </div>
+        <div class="mini">
+          <h3>已锁定订单</h3>
+          <div id="lockedBookings"></div>
+        </div>
+      </div>
+      <div class="mini" style="margin-top:12px">
+        <h3>释放 / 失效记录</h3>
+        <div id="endedBookings"></div>
+      </div>
+    </section>
   </main>
 
   <dialog id="detailDialog">
@@ -134,6 +175,25 @@
     </div>
   </dialog>
 
+  <dialog id="lockDialog">
+    <form id="lockForm" class="dialog-body">
+      <h2 id="lockDialogTitle">锁单</h2>
+      <p id="lockConflict" class="conflict" hidden></p>
+      <label>客户姓名<input id="lockCustomer" required placeholder="如：王女士" autocomplete="off"></label>
+      <div class="grid2">
+        <label>定金金额（元）<input id="lockDeposit" type="number" min="0.01" step="0.01" required></label>
+        <label>定金截止时刻<input id="lockDeadline" type="datetime-local" required></label>
+      </div>
+      <div class="actions">
+        <button type="submit">确认锁单</button>
+        <button type="button" id="lockCancel" class="secondary">取消</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="lock-rules.js"></script>
+  <script src="booking-ledger.js"></script>
+  <script src="booking-page.js"></script>
   <script>
     const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
     const storageKey = "zfl42Works";
@@ -141,7 +201,9 @@
     const seed = [
       { id: crypto.randomUUID(), base: "木胎香盒", theme: "海水江崖", line: "细线", progress: 70, dryDate: today, gold: "未处理", defect: "", delivery: "2026-06-26", status: "待阴干", note: "边线需保持低浮雕感", logs: ["创建作品"] },
       { id: crypto.randomUUID(), base: "脱胎盘", theme: "折枝梅", line: "混合线", progress: 95, dryDate: "2026-06-20", gold: "试扫粉", defect: "左侧枝干翘线", delivery: "2026-06-23", status: "上金粉", note: "客户要求金粉偏暗", logs: ["创建作品", "记录翘线"] },
-      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: "2026-06-24", gold: "未处理", defect: "", delivery: "2026-06-30", status: "贴线中", note: "", logs: ["创建作品"] }
+      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: "2026-06-24", gold: "未处理", defect: "", delivery: "2026-06-30", status: "贴线中", note: "", logs: ["创建作品"] },
+      { id: crypto.randomUUID(), base: "脱胎漆瓶", theme: "龙凤呈祥", line: "混合线", progress: 100, dryDate: "2026-06-18", gold: "已上金粉", defect: "", delivery: "2026-06-28", status: "待交付", note: "金箔已罩明", logs: ["创建作品", "上金粉完成，进入待交付"] },
+      { id: crypto.randomUUID(), base: "木胎茶则", theme: "松鹤延年", line: "细线", progress: 100, dryDate: "2026-06-19", gold: "已上金粉", defect: "鹤翅处轻微露底", delivery: "2026-07-02", status: "待交付", note: "缺陷作品不参与锁单", logs: ["创建作品", "记录露底"] }
     ];
     let works = JSON.parse(localStorage.getItem(storageKey) || "null") || seed;
     let activeId = null;
@@ -191,6 +253,7 @@
 
     function showDetail(id) {
       activeId = id;
+      window.activeId = activeId;
       const w = works.find(item => item.id === id);
       document.querySelector("#detailTitle").textContent = `${w.theme} · ${w.base}`;
       document.querySelector("#detailContent").innerHTML = `
@@ -225,6 +288,7 @@
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
               <button class="warn" onclick="recordDefect('${w.id}')">记缺陷</button>
             </div>
+            <div data-slot="${w.id}" onclick="event.stopPropagation()"></div>
           </article>`).join("") : `<div class="empty">暂无作品</div>`}
         </section>`;
       }).join("");
@@ -233,6 +297,7 @@
     function render() {
       renderSummaries();
       renderBoard();
+      if (window.BookingPage) BookingPage.refreshLockUI();
     }
 
     form.addEventListener("submit", event => {
@@ -260,7 +325,8 @@
     });
 
     document.querySelector("#saveDefect").addEventListener("click", () => {
-      recordDefect(activeId, document.querySelector("#defectInput").value.trim());
+      // 走 window 上的包装函数（booking-page.js）：补记缺陷会同时失效有效锁单
+      window.recordDefect(activeId, document.querySelector("#defectInput").value.trim());
       showDetail(activeId);
     });
     document.querySelector("#closeDialog").addEventListener("click", () => dialog.close());
@@ -279,10 +345,15 @@
       URL.revokeObjectURL(link.href);
     });
 
+    window.works = works;
+    window.activeId = activeId;
+    window.save = save;
+    window.render = render;
     window.updateStatus = updateStatus;
     window.recordDefect = recordDefect;
     window.showDetail = showDetail;
     save();
+    BookingPage.mount();
     render();
   </script>
 </body>
